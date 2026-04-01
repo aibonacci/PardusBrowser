@@ -192,9 +192,9 @@ async fn main() -> Result<()> {
         } => {
             commands::interact::run(&url, action, format, js, wait_ms).await?;
         }
-        Commands::Serve { host, port, timeout: _ } => {
-            println!("CDP server not yet implemented — use 'navigate' mode for now");
-            println!("Would start on {host}:{port}");
+        Commands::Serve { host, port, timeout } => {
+            tracing::info!("Starting CDP WebSocket server on ws://{host}:{port}");
+            commands::serve::run(&host, port, timeout).await?;
         }
         Commands::Clean {
             cache_dir,

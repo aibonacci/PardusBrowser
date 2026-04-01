@@ -1,4 +1,5 @@
 use scraper::{ElementRef, Html, Selector};
+use serde::Serialize;
 use std::fmt;
 
 /// A stable reference to an element within a Page.
@@ -6,7 +7,7 @@ use std::fmt;
 /// Stores a CSS selector that uniquely identifies the element,
 /// plus cached attribute data extracted at creation time.
 /// `Clone + Send + Sync` with no lifetime parameters.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ElementHandle {
     /// CSS selector that re-locates this element in the Page's HTML.
     pub selector: String,

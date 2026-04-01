@@ -1,4 +1,5 @@
 use scraper::{Html, Selector, ElementRef};
+use serde::Serialize;
 use std::sync::Arc;
 use std::time::Instant;
 use url::Url;
@@ -9,6 +10,19 @@ use crate::navigation::graph::NavigationGraph;
 use crate::interact::element::{ElementHandle, element_to_handle};
 
 use pardus_debug::{NetworkRecord, ResourceType, Initiator};
+
+/// Serializable snapshot of a page's state.
+///
+/// Used to transfer page data over the wire (e.g., via CDP WebSocket)
+/// without exposing the non-serializable `scraper::Html` type.
+#[derive(Debug, Clone, Serialize)]
+pub struct PageSnapshot {
+    pub url: String,
+    pub status: u16,
+    pub content_type: Option<String>,
+    pub title: Option<String>,
+    pub html: String,
+}
 
 pub struct Page {
     pub url: String,
@@ -55,6 +69,7 @@ impl Page {
         })
     }
 
+    #[cfg(feature = "js")]
     pub async fn from_url_with_js(app: &Arc<App>, url: &str, wait_ms: u32) -> anyhow::Result<Self> {
         let start = Instant::now();
 
@@ -92,6 +107,12 @@ impl Page {
             html,
             base_url,
         })
+    }
+
+    /// Returns an error indicating JS support is not compiled in.
+    #[cfg(not(feature = "js"))]
+    pub async fn from_url_with_js(_app: &Arc<App>, _url: &str, _wait_ms: u32) -> anyhow::Result<Self> {
+        anyhow::bail!("JavaScript execution is not available — rebuild with --features js");
     }
 
     pub fn from_html(html_str: &str, url: &str) -> Self {
@@ -172,6 +193,17 @@ impl Page {
 
     pub fn semantic_tree(&self) -> SemanticTree {
         SemanticTree::build(&self.html, &self.base_url)
+    }
+
+    /// Create a serializable snapshot of this page's state.
+    pub fn snapshot(&self) -> PageSnapshot {
+        PageSnapshot {
+            url: self.url.clone(),
+            status: self.status,
+            content_type: self.content_type.clone(),
+            title: self.title(),
+            html: self.html.html(),
+        }
     }
 
     pub fn navigation_graph(&self) -> NavigationGraph {
