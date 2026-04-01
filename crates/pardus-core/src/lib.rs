@@ -1,5 +1,6 @@
 pub mod app;
 pub mod config;
+pub mod interact;
 pub mod js;
 pub mod navigation;
 pub mod output;
@@ -14,3 +15,4 @@ pub use semantic::tree::{SemanticNode, SemanticRole, SemanticTree, TreeStats};
 pub use navigation::graph::NavigationGraph;
 pub use output::tree_formatter::format_tree;
 pub use output::json_formatter::format_json;
+pub use interact::{ElementHandle, FormState, InteractionResult, ScrollDirection};

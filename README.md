@@ -28,6 +28,7 @@ No Chromium binary. No Docker. No GPU. Just HTTP + HTML parsing.
 ## Features
 
 - **Semantic tree output** — ARIA roles, headings, landmarks, interactive elements
+- **Page interaction** — Click links, submit forms, type into fields, wait for selectors, scroll
 - **3 output formats** — Markdown (default), tree, JSON
 - **Navigation graph** — Internal routes, external links, form descriptors with fields
 - **Interactive-only mode** — Strip static content, show only actionable elements
@@ -201,6 +202,47 @@ pardus-browser clean --cookies-only
 pardus-browser clean --cache-only
 ```
 
+### Page interaction
+
+Interact with pages using the `interact` subcommand. Works at the HTTP level — clicks follow links and submit forms, no rendering engine required.
+
+```bash
+# Click a link — follows href, returns new page
+pardus-browser interact https://example.com click 'a'
+
+# Click a submit button — finds enclosing form, submits it
+pardus-browser interact https://example.com click 'button[type="submit"]'
+
+# Type into a field (returns the field state)
+pardus-browser interact https://example.com type 'input[name="q"]' 'search query'
+
+# Submit a form with field values
+pardus-browser interact https://example.com submit 'form' --field 'q=rust+language'
+
+# Wait for a CSS selector to appear (with timeout)
+pardus-browser interact https://example.com wait '.result-list' --timeout-ms 5000
+
+# Scroll — detects URL pagination (?page=, ?offset=, /page/N)
+pardus-browser interact 'https://example.com/news?page=1' scroll --direction down
+
+# JSON output for the result page
+pardus-browser interact https://example.com click 'a' --format json
+
+# Enable JS execution before interaction
+pardus-browser interact https://example.com wait '.dynamic-content' --js --wait-ms 3000
+```
+
+**How interactions work:**
+
+| Action | Mechanism |
+|--------|-----------|
+| `click` (link) | Resolves href, HTTP GET, returns new page |
+| `click` (button) | Finds enclosing `<form>`, collects all fields (including hidden CSRF tokens), submits via HTTP |
+| `type` | Returns field selector + value (accumulate in `FormState` before submit) |
+| `submit` | Collects all form fields from HTML, merges with `--field` values, HTTP POST/GET |
+| `wait` | Checks current HTML for selector match; polls by re-fetching if not found |
+| `scroll` | Detects pagination patterns in URL (`?page=`, `?offset=`, `?start=`, `/page/N`) |
+
 ## Architecture
 
 ```
@@ -211,7 +253,7 @@ pardus-browser
 └── crates/pardus-cli     CLI binary
 ```
 
-**pardus-core** — The engine. Fetches pages via `reqwest`, parses HTML with `scraper`, builds a semantic tree mapping ARIA roles and interactive states. Outputs Markdown, tree, or JSON.
+**pardus-core** — The engine. Fetches pages via `reqwest`, parses HTML with `scraper`, builds a semantic tree mapping ARIA roles and interactive states. Provides page interaction (click, type, submit, wait, scroll) at the HTTP level. Outputs Markdown, tree, or JSON.
 
 **pardus-debug** — Network debugging. Records all HTTP requests to a shared `NetworkLog`, discovers subresources from parsed HTML (stylesheets, scripts, images, fonts, media), fetches them in parallel, and formats DevTools-style request tables. Exposes `NetworkRecord`, `ResourceType`, `Initiator`, and `NetworkLog` types for use across crates.
 
@@ -252,6 +294,7 @@ pardus-browser
 - [x] **Multiple output formats** — Markdown, tree, JSON
 - [x] **Interactive-only mode** — Strip static content, show only actionable elements
 - [x] **Action annotations** — navigate, click, fill, toggle, select
+- [x] **Page interaction** — Click links, submit forms, type fields, wait for selectors, scroll (URL pagination)
 - [x] **Custom headers** — Pass authentication and custom headers
 - [x] **Cache management** — Clean cookies and cache
 - [x] **Network debugger** — Request table with subresource discovery and parallel fetching
@@ -276,7 +319,7 @@ pardus-browser
 ### 🚧 Planned
 
 - [ ] **CDP WebSocket server** — Playwright/Puppeteer compatible API
-- [ ] **Page interaction** — Click, type, scroll, wait for selectors
+- [ ] **JS-level interaction** — Click/type/scroll via deno_core DOM when JS is enabled
 - [ ] **Session persistence** — Cookies, localStorage, auth flows
 - [ ] **Proxy support** — HTTP/SOCKS proxies
 - [ ] **Screenshots** — Optional, for when pixels actually matter
