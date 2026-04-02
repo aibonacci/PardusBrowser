@@ -387,36 +387,6 @@ pub struct FetchResponse {
     pub ok: bool,
 }
 
-pub async fn execute_fetch(
-    client: reqwest::Client,
-    request: FetchRequest,
-) -> anyhow::Result<FetchResponse> {
-    if !is_url_safe(&request.url) {
-        anyhow::bail!("URL blocked by security policy (SSRF protection): {}", request.url);
-    }
-
-    let req = build_request(
-        &client,
-        &request.method,
-        &request.url,
-        &request.headers,
-        &request.body,
-    );
-
-    let response = req.send().await?;
-    let (status, status_text, headers) = extract_response_headers(&response);
-    let ok = (200..300).contains(&status);
-    let body = read_body_with_limit(response, OP_FETCH_MAX_BODY_SIZE).await;
-
-    Ok(FetchResponse {
-        status,
-        status_text,
-        headers,
-        body,
-        ok,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

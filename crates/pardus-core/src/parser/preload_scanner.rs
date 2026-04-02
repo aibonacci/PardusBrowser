@@ -247,16 +247,6 @@ impl Default for PreloadScanner {
     }
 }
 
-/// Sort hints by priority (critical first)
-pub fn sort_by_priority(hints: &mut [ResourceHint]) {
-    hints.sort_by_key(|h| std::cmp::Reverse(h.priority));
-}
-
-/// Filter hints by type
-pub fn filter_by_type(hints: &[ResourceHint], ty: ResourceType) -> impl Iterator<Item = &ResourceHint> {
-    hints.iter().filter(move |h| h.resource_type == ty)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

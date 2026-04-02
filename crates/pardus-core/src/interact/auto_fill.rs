@@ -1,11 +1,7 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use crate::app::App;
 use crate::page::Page;
 use crate::interact::form::FormState;
-use crate::interact::actions::InteractionResult;
-use crate::navigation::graph::NavigationGraph;
 use scraper::{ElementRef, Html, Selector};
 use serde::{Deserialize, Serialize};
 
@@ -144,47 +140,6 @@ pub fn auto_fill(values: &AutoFillValues, page: &Page) -> AutoFillResult {
     }
 
     AutoFillResult { form_state, filled_fields, unmatched_fields }
-}
-
-/// Auto-fill using a navigation graph's form descriptors instead of scraping the page.
-pub fn auto_fill_from_nav_graph(values: &AutoFillValues, nav: &NavigationGraph) -> Vec<AutoFillResult> {
-    nav.forms.iter().map(|form| {
-        let mut form_state = FormState::new();
-        let mut filled_fields = Vec::new();
-        let mut unmatched_fields = Vec::new();
-
-        for field in &form.fields {
-            let field_name = field.name.clone().unwrap_or_default();
-            let value = resolve_value(
-                values,
-                &field_name,
-                &field.label,
-                &field.placeholder,
-                &field.field_type,
-            );
-
-            if let Some(value) = value {
-                if !field_name.is_empty() {
-                    form_state.set(&field_name, &value);
-                    filled_fields.push(AutoFillFieldResult {
-                        field_name: field_name.clone(),
-                        value,
-                        matched_by: MatchMethod::ByName,
-                    });
-                }
-            } else {
-                unmatched_fields.push(UnmatchedField {
-                    field_name: field.name.clone(),
-                    field_type: field.field_type.clone(),
-                    label: field.label.clone(),
-                    placeholder: field.placeholder.clone(),
-                    required: field.required,
-                });
-            }
-        }
-
-        AutoFillResult { form_state, filled_fields, unmatched_fields }
-    }).collect()
 }
 
 /// Resolve a value for a field using multiple matching strategies.
@@ -349,27 +304,6 @@ fn find_label_for_element(form: &ElementRef, field_name: Option<&str>) -> Option
         }
     }
     None
-}
-
-/// Convenience: auto-fill and immediately submit a form.
-pub async fn auto_fill_and_submit(
-    app: &Arc<App>,
-    page: &Page,
-    values: &AutoFillValues,
-    form_selector: &str,
-) -> anyhow::Result<(AutoFillResult, InteractionResult)> {
-    let result = auto_fill(values, page);
-    let issues = validate_auto_fill(&result);
-
-    if !issues.is_empty() {
-        let issue_str: Vec<String> = issues.iter().map(|(name, status)| {
-            format!("{}: {:?}", name, status)
-        }).collect();
-        tracing::warn!("Auto-fill validation issues: {}", issue_str.join("; "));
-    }
-
-    let submit_result = crate::interact::form::submit_form(app, page, form_selector, &result.form_state).await?;
-    Ok((result, submit_result))
 }
 
 #[cfg(test)]

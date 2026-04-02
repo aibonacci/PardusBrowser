@@ -2,8 +2,8 @@
 
 ## Project Status Summary
 
-**Current Version:** 0.4.0-dev  
-**Branch:** dev/interect  
+**Current Version:** 0.4.0-dev
+**Branch:** dev/roadmap
 **Last Updated:** April 2, 2026
 
 ---
@@ -45,6 +45,15 @@
   - Configurable modes: default, permissive, allowlist
   - Wired into BrowserConfig and JS fetch API
   - IPv4 and IPv6 validation with bracket notation support
+- [x] **Basic auth** — 401 response handling with Basic and Bearer auth
+  - `SessionStore::parse_auth_header()` supports `basic:user:pass` and `bearer:token` formats
+  - Automatic `Authorization` header injection on requests
+- [x] **CSP compliance** — Content Security Policy parsing and enforcement
+  - Full CSP module with directive parsing, source matching, and evaluation
+  - Supports all major directives: default-src, script-src, style-src, img-src, connect-src, etc.
+  - CSP violation reporting and configurable enforcement modes
+- [x] **Certificate pinning** — Custom CA/cert validation (SPKI hash + CA cert, 738 lines in `tls/pinning.rs`)
+- [x] **Sandbox mode** — Restricted execution for untrusted content (off/strict/moderate/minimal, 289 lines in `sandbox/mod.rs`)
 
 ### Session & State Management
 - [x] **Session persistence** — Cookies, localStorage, auth headers with size limits
@@ -102,6 +111,9 @@
   - [x] Pardus — Custom domain for Pardus-specific features
 - [x] **Event bus** — Real-time events to CDP clients
 - [x] **Node mapping** — backendNodeId ↔ selector translation
+- [x] **CDP → Browser API migration** — DomainContext provides `create_browser()` to create Browser on-demand
+  - Navigation methods (`navigate()`, `reload()`) use unified Browser API
+  - `!Send` constraint from scraper types handled via on-demand creation
 
 ### CLI & UX
 - [x] **8 subcommands:** navigate, interact, serve, repl, tab, map, clean
@@ -123,12 +135,7 @@
 
 ## 🔧 In Progress / Needs Polish
 
-### CDP Integration
-- [x] **CDP → Browser API migration** — Wiring CDP handlers through unified `Browser` type
-  - Status: DomainContext now provides `create_browser()` method to create temporary Browser instances from App config
-  - Resolution: The `!Send` constraint from scraper types (Cell in Html) prevents storing Browser directly, so we create Browser on-demand in handlers
-  - Result: Navigation methods (`navigate()`, `reload()`) now use the unified Browser API while keeping DomainContext Send+Sync
-  - Note: JS evaluation via Runtime domain stubbed - full integration requires exposing JS runtime through Browser
+_(Currently empty)_
 
 ---
 
@@ -180,10 +187,10 @@
 
 ### Security & Authentication
 - [x] **SSRF protection** — URL policy blocking private IPs, metadata endpoints, non-HTTP schemes
-- [ ] **Basic auth** — 401 response handling
+- [x] **Basic auth** — 401 response handling with Basic and Bearer auth
 - [ ] **OAuth flow** — OAuth 2.0 / OIDC automation helpers
 - [x] **Certificate pinning** — Custom CA/cert validation (SPKI hash + CA cert, 738 lines in `tls/pinning.rs`)
-- [ ] **CSP compliance** — Content Security Policy enforcement
+- [x] **CSP compliance** — Content Security Policy parsing and enforcement
 - [x] **Sandbox mode** — Restricted execution for untrusted content (off/strict/moderate/minimal, 289 lines in `sandbox/mod.rs`)
 
 ### API & Integration
@@ -208,7 +215,10 @@
   - Page.addScriptToEvaluateOnNewDocument, getResourceTree, createIsolatedWorld
   - CSS.getInlineStylesForNode parses real inline style attributes
   - Full method coverage expansion across all 14 domains
-- [ ] **Docker image** — Official container with health checks
+- [x] **Docker image** — Multi-stage build with health check, non-root user, EXPOSE 9222
+  - `docker run -p 9222:9222 pardus-browser` starts CDP server on `0.0.0.0:9222`
+  - HEALTHCHECK hits `/json/version` every 30s
+  - Non-root `pardus` user, ENTRYPOINT allows `docker run ... navigate`, `docker run ... repl`, etc.
 
 ### Developer Experience
 - [ ] **HAR export** — HTTP Archive format for request logs
@@ -227,8 +237,8 @@
 | Page parse (typical) | ~150ms | ~100ms |
 | JS execution timeout | 3s | Configurable |
 | CDP domains | 14/20 | 20/20 |
-| Test coverage | ~60% | 85% |
-| Binary size | ~15MB | <10MB |
+| Test count | ~741 tests | — |
+| Binary size | ~3.7MB | <10MB ✅ |
 
 ---
 
