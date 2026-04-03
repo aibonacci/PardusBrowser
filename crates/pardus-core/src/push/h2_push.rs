@@ -188,6 +188,7 @@ impl H2PushReceiver {
             return;
         }
 
+        let body_len = body.len();
         self.push_cache.insert_success(
             url.to_string(),
             status,
@@ -197,7 +198,7 @@ impl H2PushReceiver {
             PushSource::H2PushPromise,
         );
         self.remove_active(url);
-        debug!("h2 push: stored {} bytes for {}", body.len(), url);
+        debug!("h2 push: stored {} bytes for {}", body_len, url);
     }
 
     /// Handle a failed push stream.

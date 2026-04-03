@@ -46,13 +46,7 @@ pub async fn run_with_config(js: bool, format: OutputFormatArg, wait_ms: u32, pr
         }
         let _ = rl.add_history_entry(trimmed);
 
-        let tokens = match shell_words::split(trimmed) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("Parse error: {}", e);
-                continue;
-            }
-        };
+        let tokens = split_tokens(trimmed);
 
         if tokens.is_empty() {
             continue;
@@ -98,22 +92,45 @@ pub async fn run_with_config(js: bool, format: OutputFormatArg, wait_ms: u32, pr
             // Interactions
             "click" => {
                 if tokens.len() < 2 {
-                    eprintln!("Usage: click <selector>");
+                    eprintln!("Usage: click <selector|#id>");
                     continue;
                 }
-                match browser.click(&tokens[1]).await {
-                    Ok(result) => print_interaction_result(&result, &format),
-                    Err(e) => eprintln!("Error: {}", e),
+                let selector = &tokens[1];
+                if let Some(id_str) = selector.strip_prefix('#') {
+                    match id_str.parse::<usize>() {
+                        Ok(id) => match browser.click_by_id(id).await {
+                            Ok(result) => print_interaction_result(&result, &format),
+                            Err(e) => eprintln!("Error: {}", e),
+                        },
+                        Err(_) => eprintln!("Invalid element ID: {}", selector),
+                    }
+                } else {
+                    match browser.click(selector).await {
+                        Ok(result) => print_interaction_result(&result, &format),
+                        Err(e) => eprintln!("Error: {}", e),
+                    }
                 }
             }
             "type" => {
                 if tokens.len() < 3 {
-                    eprintln!("Usage: type <selector> <value>");
+                    eprintln!("Usage: type <selector|#id> <value>");
                     continue;
                 }
-                match browser.type_text(&tokens[1], &tokens[2]).await {
-                    Ok(result) => print_interaction_result(&result, &format),
-                    Err(e) => eprintln!("Error: {}", e),
+                let selector = &tokens[1];
+                let value = &tokens[2];
+                if let Some(id_str) = selector.strip_prefix('#') {
+                    match id_str.parse::<usize>() {
+                        Ok(id) => match browser.type_by_id(id, value).await {
+                            Ok(result) => print_interaction_result(&result, &format),
+                            Err(e) => eprintln!("Error: {}", e),
+                        },
+                        Err(_) => eprintln!("Invalid element ID: {}", selector),
+                    }
+                } else {
+                    match browser.type_text(selector, value).await {
+                        Ok(result) => print_interaction_result(&result, &format),
+                        Err(e) => eprintln!("Error: {}", e),
+                    }
                 }
             }
             "submit" => {
@@ -484,6 +501,31 @@ async fn handle_tab(
             eprintln!("Unknown tab command: {}. Use: list, open, switch, close, info", other);
         }
     }
+}
+
+/// Split a line into tokens by whitespace, respecting double-quoted strings.
+/// Unlike shell_words::split, this does NOT treat # as a comment character.
+fn split_tokens(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '"' {
+            in_quotes = !in_quotes;
+        } else if ch.is_whitespace() && !in_quotes {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push(ch);
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
 }
 
 fn print_help() {

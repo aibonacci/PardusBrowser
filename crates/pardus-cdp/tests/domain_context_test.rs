@@ -271,7 +271,7 @@ async fn test_event_bus_in_domain_context() {
     let event_bus = Arc::new(EventBus::new(1024));
     let node_map = Arc::new(Mutex::new(NodeMap::new()));
 
-    let ctx = DomainContext::new(app, targets, event_bus.clone(), node_map);
+    let _ctx = DomainContext::new(app, targets, event_bus.clone(), node_map);
 
     // Subscribe to events
     let mut rx = event_bus.subscribe();
@@ -309,7 +309,7 @@ async fn test_browser_uses_app_config() {
     let ctx = DomainContext::new(app, targets, event_bus, node_map);
 
     // Create browser and verify it works
-    let mut browser = ctx.create_browser();
+    let browser = ctx.create_browser();
 
     // Verify browser starts with no active tab
     assert!(browser.active_tab().is_none());
@@ -327,7 +327,7 @@ async fn test_concurrent_target_access() {
     let event_bus = Arc::new(EventBus::new(1024));
     let node_map = Arc::new(Mutex::new(NodeMap::new()));
 
-    let ctx = DomainContext::new(app, targets.clone(), event_bus, node_map);
+    let _ctx = DomainContext::new(app, targets.clone(), event_bus, node_map);
 
     // Spawn multiple tasks to access targets concurrently
     let mut handles = vec![];

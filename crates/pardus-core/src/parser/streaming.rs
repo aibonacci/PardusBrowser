@@ -150,20 +150,3 @@ impl StreamingParser {
         }
     }
 }
-
-/// Fast path for extracting just the resources without building DOM
-pub fn extract_resources_only(html: &[u8], base_url: &str) -> Vec<ResourceHint> {
-    let scanner = PreloadScanner::new();
-    scanner.scan(html)
-        .into_iter()
-        .map(|mut hint| {
-            // Resolve relative URLs
-            if let Ok(base) = url::Url::parse(base_url) {
-                if let Ok(resolved) = base.join(&hint.url) {
-                    hint.url = resolved.to_string();
-                }
-            }
-            hint
-        })
-        .collect()
-}

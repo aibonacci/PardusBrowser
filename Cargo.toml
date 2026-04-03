@@ -41,3 +41,9 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# Patch temporal_rs to fix compatibility with icu_calendar v2.2.x.
+# v8 147.0.0 pins temporal_capi = "0.1.2" → temporal_rs 0.1.2,
+# which uses icu_calendar APIs that changed in 2.2.x.
+[patch.crates-io]
+temporal_rs = { path = "patches/temporal_rs" }

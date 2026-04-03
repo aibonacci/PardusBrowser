@@ -5,7 +5,6 @@
 
 pub mod builtins;
 pub mod rules;
-pub mod send;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

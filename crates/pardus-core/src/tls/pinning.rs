@@ -532,7 +532,6 @@ mod tests {
         let hash = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(sha2::Sha256::digest(b"completely-different-data"));
 
-        let pin = CertPin::spki_sha256(&hash);
         let cert = CertificateDer::from(b"some-spki-data-for-testing".to_vec());
         let computed = CertPin::compute_spki_hash(&cert, PinAlgorithm::Sha256);
         let normalized = normalize_base64_hash(&hash);

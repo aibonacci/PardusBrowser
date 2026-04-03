@@ -5,7 +5,6 @@ pub mod element;
 pub mod form;
 pub mod recording;
 pub mod scroll;
-pub mod validation;
 pub mod wait;
 #[cfg(feature = "js")]
 pub mod js_interact;
