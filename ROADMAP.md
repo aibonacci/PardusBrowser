@@ -35,7 +35,49 @@ Core engine, CLI, and all major subsystems are stable. Summary of shipped featur
 
 ## In Progress
 
-_(Currently empty)_
+### Tauri Desktop App — Mission Control for AI Agents
+
+**Priority: Urgent** — The desktop app is the primary interface for users to manage, monitor, and assist AI browsing agents.
+
+**Phase 1 — Semantic Tree Viewer + CAPTCHA Handoff (current)**
+- [ ] Semantic tree viewer panel — render ARIA role tree with interactive nodes in Tauri dashboard
+- [ ] Per-instance controls — URL bar, navigate, agent status (idle/running/waiting-challenge)
+- [ ] CAPTCHA handoff — when agent hits a challenge, popup OS webview (WKWebView/WebKitGTK/WebView2) for user to solve, then sync cookies back to headless browser via CDP `Network.setCookie`
+- [ ] Cookie bridge — `tokio-tungstenite` WebSocket client to inject cookies into headless CDP server
+- [ ] Agent action log — real-time log of agent actions (navigate, click, type, wait) streamed from CDP events
+- [ ] Cross-platform — dashboard is pure HTML/CSS (no OS webview dependency for primary view); CAPTCHA popup uses OS webview only when needed
+
+**Phase 2 — Multi-Agent Dashboard**
+- [ ] Multiple concurrent agent instances — spawn/manage N agents in one window
+- [ ] Agent status grid — see all agents at a glance with status indicators (running, idle, stuck, CAPTCHA)
+- [ ] Live agent action streaming — watch each agent's actions in real-time via CDP event bus
+- [ ] Take-over button — pause agent, let user manually interact, then resume agent
+- [ ] Agent conversation panel — show the LLM conversation alongside browser actions
+
+**Phase 3 — Rendered View (Optional)**
+- [ ] Rendered page tab — OS webview shows actual page pixels (WKWebView on macOS, WebKitGTK on Linux, WebView2 on Windows)
+- [ ] Split view — semantic tree on left, rendered pixels on right
+- [ ] Screenshot capture — use pardus-core screenshot feature (chromiumoxide) for pixel-perfect captures
+
+**Architecture:**
+```
+┌─ Mission Control ──────────────────────────────────────┐
+│ ┌─ Agents ─────┐  ┌─ Semantic Tree ──────────────────┐ │
+│ │ ● Agent 1    │  │ [Document]                        │ │
+│ │   Shopping   │  │  ├── [Nav] "Menu"                 │ │
+│ │   Running    │  │  ├── [Main]                       │ │
+│ │              │  │  │   ├── [H1] "Welcome"           │ │
+│ │ ● Agent 2    │  │  │   ├── [TextBox #3] "Email"    │ │
+│ │   Research   │  │  │   └── [Button #4] "Submit"    │ │
+│ │   ⚠ CAPTCHA  │  │  └── [Footer]                     │ │
+│ └──────────────┘  └───────────────────────────────────┘ │
+│ ┌─ Action Log ────────────────────────────────────────┐ │
+│ │ 12:03:01 Navigate → shop.example.com                │ │
+│ │ 12:03:02 Click [#5] "Add to Cart"                   │ │
+│ │ 12:03:03 ⚠ CAPTCHA detected — Cloudflare           │ │
+│ └─────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
+```
 
 ---
 

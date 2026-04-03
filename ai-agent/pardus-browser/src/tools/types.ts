@@ -20,6 +20,7 @@ export interface ToolExecutionConfig {
 export interface ParallelToolGroup {
   /** Tools that can be executed in parallel */
   tools: Array<{
+    toolCallId?: string;
     name: string;
     args: Record<string, unknown>;
     config?: ToolExecutionConfig;
@@ -29,6 +30,8 @@ export interface ParallelToolGroup {
 }
 
 export interface ToolExecutionResult {
+  /** The original LLM tool call ID, used to correlate results back */
+  toolCallId: string;
   name: string;
   args: Record<string, unknown>;
   success: boolean;
@@ -88,7 +91,7 @@ export function canExecuteInParallel(
  * Each group contains tools that can safely execute in parallel.
  */
 export function groupToolsForParallelExecution(
-  tools: Array<{ name: string; args: Record<string, unknown>; config?: ToolExecutionConfig }>
+  tools: Array<{ toolCallId?: string; name: string; args: Record<string, unknown>; config?: ToolExecutionConfig }>
 ): ParallelToolGroup[] {
   const groups: ParallelToolGroup[] = [];
   let currentGroup: ParallelToolGroup = { tools: [], failureStrategy: 'continue' };

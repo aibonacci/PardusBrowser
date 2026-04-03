@@ -199,11 +199,28 @@ class MutationObserver {
   takeRecords() { return []; }
 }
 
+// ==================== Storage (Read-Only) ====================
+
+var _noopStorage = new Proxy({}, {
+  get: function(_, prop) {
+    if (prop === 'getItem') return function() { return null; };
+    if (prop === 'setItem') return function() {};
+    if (prop === 'removeItem') return function() {};
+    if (prop === 'clear') return function() {};
+    if (prop === 'key') return function() { return null; };
+    if (prop === 'length') return 0;
+    return null;
+  },
+  set: function() { return true; }
+});
+
 // ==================== Window (Read-Only) ====================
 
 const window = {
   document,
   fetch() { return Promise.reject(new Error("fetch is disabled in read-only mode")); },
+  localStorage: _noopStorage,
+  sessionStorage: _noopStorage,
   addEventListener: document.addEventListener.bind(document),
   removeEventListener: document.removeEventListener.bind(document),
   location: new Proxy({
@@ -231,6 +248,8 @@ const window = {
 
 globalThis.window = window;
 globalThis.document = document;
+globalThis.localStorage = _noopStorage;
+globalThis.sessionStorage = _noopStorage;
 globalThis.Element = Element;
 globalThis.TextNode = Element;
 globalThis.DocumentFragment = Element;

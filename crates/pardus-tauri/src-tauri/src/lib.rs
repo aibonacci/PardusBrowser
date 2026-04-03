@@ -1,5 +1,7 @@
+mod browser_window;
 mod challenge;
 mod commands;
+mod cookie_bridge;
 mod instance;
 
 use std::collections::HashMap;
@@ -30,6 +32,9 @@ pub fn run() {
             commands::open_challenge_window,
             commands::submit_challenge_resolution,
             commands::cancel_challenge,
+            commands::open_browser_window,
+            commands::navigate_browser_window,
+            commands::close_browser_window,
         ])
         .setup(|app| {
             tracing_subscriber::fmt()
@@ -70,6 +75,48 @@ pub fn run() {
                     tauri::async_runtime::spawn(async move {
                         r.handle_failed(url, "challenge timed out (5 minutes)".to_string()).await;
                     });
+                }
+            });
+
+            // Listen for browser-navigate events from browser window toolbars
+            let nav_handle = app.handle().clone();
+            app.listen("browser-navigate", move |event| {
+                let payload = event.payload();
+                if let Ok(data) = serde_json::from_str::<serde_json::Value>(payload) {
+                    let instance_id = data["instance_id"].as_str().unwrap_or("").to_string();
+                    let url = data["url"].as_str().unwrap_or("").to_string();
+                    let h = nav_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let label = format!("browser-{}", instance_id);
+                        // Close and reopen with new URL
+                        if let Some(window) = h.get_webview_window(&label) {
+                            let _ = window.close();
+                        }
+                        if let Ok(_new_label) = browser_window::open_browser_window(&h, &instance_id, &url) {
+                            // Update instance state
+                            let state = h.state::<AppState>();
+                            let mut instances = state.instances.lock().unwrap();
+                            if let Some(inst) = instances.get_mut(&instance_id) {
+                                inst.current_url = Some(url);
+                            }
+                        }
+                    });
+                }
+            });
+
+            // Listen for browser-url-changed events to track current URL
+            let url_handle = app.handle().clone();
+            app.listen("browser-url-changed", move |event| {
+                let payload = event.payload();
+                if let Ok(data) = serde_json::from_str::<serde_json::Value>(payload) {
+                    let instance_id = data["instance_id"].as_str().unwrap_or("").to_string();
+                    let url = data["url"].as_str().unwrap_or("").to_string();
+                    let h = url_handle.clone();
+                    let state = h.state::<AppState>();
+                    let mut instances = state.instances.lock().unwrap();
+                    if let Some(inst) = instances.get_mut(&instance_id) {
+                        inst.current_url = Some(url.to_string());
+                    }
                 }
             });
 

@@ -467,36 +467,85 @@ class Element {
 
 // ==================== MutationObserver ====================
 
+// Global registry: observer_id -> MutationObserver instance
+const _observerInstances = new Map();
+
+function _deliverPendingMutations() {
+  if (typeof Deno.core.ops.op_has_observers === 'function' && !Deno.core.ops.op_has_observers()) return;
+  var grouped = Deno.core.ops.op_drain_pending_mutations();
+  for (var i = 0; i < grouped.length; i++) {
+    var obsId = grouped[i][0];
+    var records = grouped[i][1];
+    var observer = _observerInstances.get(obsId);
+    if (!observer) continue;
+    var mappedRecords = [];
+    for (var j = 0; j < records.length; j++) {
+      var r = records[j];
+      mappedRecords.push({
+        type: r.type_,
+        target: r.target ? new Element(r.target) : null,
+        addedNodes: (r.added_nodes || []).map(function(id) { return new Element(id); }),
+        removedNodes: (r.removed_nodes || []).map(function(id) { return new Element(id); }),
+        attributeName: r.attribute_name || null,
+        oldValue: r.old_value || null,
+      });
+    }
+    try {
+      observer.__callback.call(observer, mappedRecords, observer);
+    } catch (e) {
+      // Ignore errors in observer callbacks
+    }
+  }
+}
+
 class MutationObserver {
   constructor(callback) {
     this.__callback = callback;
-    this.__id = Deno.core.ops.op_register_observer(0, true, true, false);
+    this.__id = 0;  // Assigned on observe()
   }
 
-  observe(target, options = {}) {
-    if (target && target.__nodeId) {
-      this.__id = Deno.core.ops.op_register_observer(
-        target.__nodeId,
-        options.childList || false,
-        options.attributes !== false,
-        options.subtree || false
-      );
+  observe(target, options) {
+    if (!target || !target.__nodeId) return;
+    options = options || {};
+
+    // Disconnect old registration if re-observing
+    if (this.__id > 0) {
+      Deno.core.ops.op_disconnect_observer(this.__id);
+      _observerInstances.delete(this.__id);
     }
+
+    this.__id = Deno.core.ops.op_register_observer(
+      target.__nodeId,
+      !!options.childList,
+      options.attributes !== false,
+      !!options.subtree,
+      !!options.characterData,
+      !!options.attributeOldValue,
+      !!options.characterDataOldValue,
+      options.attributeFilter || []
+    );
+    _observerInstances.set(this.__id, this);
   }
 
   disconnect() {
-    Deno.core.ops.op_disconnect_observer(this.__id);
+    if (this.__id > 0) {
+      Deno.core.ops.op_disconnect_observer(this.__id);
+      _observerInstances.delete(this.__id);
+      this.__id = 0;
+    }
   }
 
   takeRecords() {
-    return Deno.core.ops.op_take_mutation_records().map(r => ({
-      type: r.type_,
-      target: r.target ? new Element(r.target) : null,
-      addedNodes: (r.added_nodes || []).map(id => new Element(id)),
-      removedNodes: (r.removed_nodes || []).map(id => new Element(id)),
-      attributeName: r.attribute_name || null,
-      oldValue: r.old_value || null,
-    }));
+    return Deno.core.ops.op_take_mutation_records().map(function(r) {
+      return {
+        type: r.type_,
+        target: r.target ? new Element(r.target) : null,
+        addedNodes: (r.added_nodes || []).map(function(id) { return new Element(id); }),
+        removedNodes: (r.removed_nodes || []).map(function(id) { return new Element(id); }),
+        attributeName: r.attribute_name || null,
+        oldValue: r.old_value || null,
+      };
+    });
   }
 }
 
@@ -623,6 +672,87 @@ const document = {
   }
 };
 
+// ==================== document.cookie ====================
+
+Object.defineProperty(document, 'cookie', {
+  get: function() {
+    return Deno.core.ops.op_get_document_cookie(globalThis.__pardusOrigin || '');
+  },
+  set: function(v) {
+    Deno.core.ops.op_set_document_cookie(globalThis.__pardusOrigin || '', String(v));
+  },
+  enumerable: true,
+  configurable: true,
+});
+
+// ==================== Storage (localStorage / sessionStorage) ====================
+
+function _createStorage(type) {
+  var _ops = {
+    get: type === 'local' ? Deno.core.ops.op_local_storage_get : Deno.core.ops.op_session_storage_get,
+    set: type === 'local' ? Deno.core.ops.op_local_storage_set : Deno.core.ops.op_session_storage_set,
+    remove: type === 'local' ? Deno.core.ops.op_local_storage_remove : Deno.core.ops.op_session_storage_remove,
+    clear: type === 'local' ? Deno.core.ops.op_local_storage_clear : Deno.core.ops.op_session_storage_clear,
+    keys: type === 'local' ? Deno.core.ops.op_local_storage_keys : Deno.core.ops.op_session_storage_keys,
+    length: type === 'local' ? Deno.core.ops.op_local_storage_length : Deno.core.ops.op_session_storage_length,
+  };
+
+  var handler = {
+    get: function(target, prop) {
+      var origin = globalThis.__pardusOrigin || '';
+      if (prop === 'getItem') return function(key) { return _ops.get(origin, key) || null; };
+      if (prop === 'setItem') return function(key, value) { _ops.set(origin, key, String(value)); };
+      if (prop === 'removeItem') return function(key) { _ops.remove(origin, key); };
+      if (prop === 'clear') return function() { _ops.clear(origin); };
+      if (prop === 'key') return function(index) {
+        var k = _ops.keys(origin);
+        return index >= 0 && index < k.length ? k[index] : null;
+      };
+      if (prop === 'length') return _ops.length(origin);
+      // Bracket access: storage['key']
+      if (typeof prop === 'string') return _ops.get(origin, prop) || null;
+      return undefined;
+    },
+    set: function(target, prop, value) {
+      var origin = globalThis.__pardusOrigin || '';
+      if (typeof prop === 'string') {
+        if (value === null || value === undefined) {
+          _ops.remove(origin, prop);
+        } else {
+          _ops.set(origin, prop, String(value));
+        }
+      }
+      return true;
+    },
+    has: function(target, prop) {
+      var origin = globalThis.__pardusOrigin || '';
+      return _ops.get(origin, prop) !== null;
+    },
+    deleteProperty: function(target, prop) {
+      var origin = globalThis.__pardusOrigin || '';
+      _ops.remove(origin, prop);
+      return true;
+    },
+    ownKeys: function() {
+      var origin = globalThis.__pardusOrigin || '';
+      return _ops.keys(origin);
+    },
+    getOwnPropertyDescriptor: function(target, prop) {
+      var origin = globalThis.__pardusOrigin || '';
+      var val = _ops.get(origin, prop);
+      if (val !== null) {
+        return { value: val, writable: true, enumerable: true, configurable: true };
+      }
+      return undefined;
+    }
+  };
+
+  return new Proxy({}, handler);
+}
+
+var localStorage = _createStorage('local');
+var sessionStorage = _createStorage('session');
+
 // ==================== Fetch polyfill ====================
 
 async function fetch(input, init) {
@@ -660,6 +790,8 @@ async function fetch(input, init) {
 const window = {
   document,
   fetch,
+  localStorage: localStorage,
+  sessionStorage: sessionStorage,
   addEventListener: document.addEventListener.bind(document),
   removeEventListener: document.removeEventListener.bind(document),
   location: new Proxy({
@@ -932,6 +1064,8 @@ class EventSource {
 globalThis.window = window;
 globalThis.document = document;
 globalThis.fetch = fetch;
+globalThis.localStorage = localStorage;
+globalThis.sessionStorage = sessionStorage;
 globalThis.Element = Element;
 globalThis.TextNode = TextNode;
 globalThis.DocumentFragment = DocumentFragment;

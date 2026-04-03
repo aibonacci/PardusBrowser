@@ -85,9 +85,18 @@ export class LLMClient {
   }
 
   /**
-   * Stream a conversation (for interactive CLI)
+   * Stream a conversation (for interactive CLI).
+   * Buffers tool call chunks and returns the full result including tool calls.
    */
-  async *streamChat(messages: Message[]): AsyncGenerator<string, void, unknown> {
+  async streamChat(messages: Message[]): Promise<{
+    content: string | null;
+    toolCalls?: Array<{
+      id: string;
+      name: string;
+      arguments: Record<string, unknown>;
+    }>;
+    textChunks: string[];
+  }> {
     const stream = await this.client.chat.completions.create({
       model: this.config.model,
       messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
@@ -98,12 +107,60 @@ export class LLMClient {
       stream: true,
     });
 
+    const textChunks: string[] = [];
+    let fullContent = '';
+
+    // Accumulate tool call fragments from stream chunks
+    const toolCallAccum = new Map<number, { id: string; name: string; argsStr: string }>();
+
     for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content;
-      if (delta) {
-        yield delta;
+      const choice = chunk.choices[0];
+      if (!choice) continue;
+
+      const delta = choice.delta;
+
+      // Text content
+      if (delta?.content) {
+        textChunks.push(delta.content);
+        fullContent += delta.content;
+      }
+
+      // Tool call deltas — accumulate by index
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index ?? 0;
+          if (!toolCallAccum.has(idx)) {
+            toolCallAccum.set(idx, {
+              id: tc.id ?? '',
+              name: tc.function?.name ?? '',
+              argsStr: '',
+            });
+          }
+          const entry = toolCallAccum.get(idx)!;
+          if (tc.id) entry.id = tc.id;
+          if (tc.function?.name) entry.name = tc.function.name;
+          if (tc.function?.arguments) entry.argsStr += tc.function.arguments;
+        }
       }
     }
+
+    // Assemble tool calls
+    const toolCalls: Array<{ id: string; name: string; arguments: Record<string, unknown> }> = [];
+    for (const [_, tc] of toolCallAccum) {
+      let parsedArgs: Record<string, unknown> = {};
+      try {
+        parsedArgs = JSON.parse(tc.argsStr) as Record<string, unknown>;
+      } catch {
+        parsedArgs = {};
+      }
+      toolCalls.push({ id: tc.id, name: tc.name, arguments: parsedArgs });
+    }
+
+    return {
+      content: fullContent || null,
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      textChunks,
+    };
   }
 
   getModel(): string {

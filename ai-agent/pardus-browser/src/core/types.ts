@@ -59,6 +59,8 @@ export interface BrowserSubmitResult {
 
 export interface BrowserScrollResult {
   success: boolean;
+  /** Updated semantic tree after scrolling */
+  markdown?: string;
   error?: string;
 }
 

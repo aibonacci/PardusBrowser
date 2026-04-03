@@ -8,6 +8,9 @@ use serde_json;
 use pardus_challenge::resolver::{ChallengeResolver, Resolution};
 use pardus_challenge::detector::ChallengeInfo;
 
+use crate::browser_window;
+use crate::cookie_bridge;
+
 const CHALLENGE_MONITOR_JS: &str = r#"
 (function() {
     if (window.__pardusChallengeActive) return;
@@ -88,8 +91,9 @@ const CHALLENGE_MONITOR_JS: &str = r#"
 "#;
 
 struct PendingChallenge {
-    url: String,
+    _url: String,
     window_label: String,
+    instance_id: Option<String>,
     tx: oneshot::Sender<Resolution>,
 }
 
@@ -106,36 +110,71 @@ impl TauriChallengeResolver {
         }
     }
 
+    /// Open a challenge window — reuses existing browser window if one exists for the instance.
     async fn open_challenge_window(
         &self,
         info: &ChallengeInfo,
+        instance_id: Option<&str>,
         tx: oneshot::Sender<Resolution>,
     ) -> Result<(), String> {
-        let sanitized: String = info.url.chars().take(40).map(|c| {
-            if c.is_alphanumeric() { c } else { '-' }
-        }).collect();
-        let label = format!("challenge-{}", sanitized);
+        let label = if let Some(inst_id) = instance_id {
+            // Try to reuse the existing browser window for this instance
+            let browser_label = format!("browser-{}", inst_id);
+            if let Some(window) = self.app_handle.get_webview_window(&browser_label) {
+                // Navigate existing browser window to the challenge URL
+                let _parsed: url::Url = info.url.parse().map_err(|e: url::ParseError| e.to_string())?;
+                // Close and reopen with challenge URL
+                let _ = window.close();
+                let new_label = browser_window::open_browser_window(
+                    &self.app_handle, inst_id, &info.url.to_string(),
+                )?;
+                // Inject challenge banner
+                browser_window::inject_challenge_banner(&self.app_handle, inst_id)?;
+                new_label
+            } else {
+                // No existing window — create a new browser window
+                let new_label = browser_window::open_browser_window(
+                    &self.app_handle, inst_id, &info.url.to_string(),
+                )?;
+                browser_window::inject_challenge_banner(&self.app_handle, inst_id)?;
+                new_label
+            }
+        } else {
+            // Fallback: create a standalone challenge window
+            let sanitized: String = info.url.chars().take(40).map(|c| {
+                if c.is_alphanumeric() { c } else { '-' }
+            }).collect();
+            let label = format!("challenge-{}", sanitized);
 
-        let parsed_url: url::Url = info.url.parse().map_err(|e: url::ParseError| e.to_string())?;
+            let parsed_url: url::Url = info.url.parse().map_err(|e: url::ParseError| e.to_string())?;
 
-        let kind_str = info.kinds.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(", ");
-        let title = format!("Solve: {}", kind_str);
+            let kind_str = info.kinds.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(", ");
+            let title = format!("Solve: {}", kind_str);
 
-        WebviewWindowBuilder::new(
-            &self.app_handle,
-            &label,
-            WebviewUrl::External(parsed_url),
-        )
-        .title(&title)
-        .inner_size(500.0, 680.0)
-        .resizable(true)
-        .initialization_script(CHALLENGE_MONITOR_JS)
-        .build()
-        .map_err(|e| e.to_string())?;
+            WebviewWindowBuilder::new(
+                &self.app_handle,
+                &label,
+                WebviewUrl::External(parsed_url),
+            )
+            .title(&title)
+            .inner_size(500.0, 680.0)
+            .resizable(true)
+            .initialization_script(CHALLENGE_MONITOR_JS)
+            .build()
+            .map_err(|e| e.to_string())?;
+
+            label
+        };
+
+        // Also inject the challenge monitor script into the browser window
+        if let Some(window) = self.app_handle.get_webview_window(&label) {
+            let _ = window.eval(CHALLENGE_MONITOR_JS);
+        }
 
         let pending = PendingChallenge {
-            url: info.url.clone(),
+            _url: info.url.clone(),
             window_label: label,
+            instance_id: instance_id.map(|s| s.to_string()),
             tx,
         };
         self.pending.lock().await.insert(info.url.clone(), pending);
@@ -146,8 +185,21 @@ impl TauriChallengeResolver {
     pub async fn handle_cookies(&self, challenge_url: String, cookies: String) {
         let mut pending = self.pending.lock().await;
         if let Some(challenge) = pending.remove(&challenge_url) {
+            // Close the challenge window
             if let Some(window) = self.app_handle.get_webview_window(&challenge.window_label) {
                 let _ = window.close();
+            }
+
+            // Extract port before any async work (drop MutexGuard first)
+            let port = challenge.instance_id.as_ref().and_then(|inst_id| {
+                let instances = self.app_handle.state::<crate::AppState>();
+                let lock = instances.instances.lock().unwrap();
+                lock.get(inst_id).map(|i| i.port)
+            });
+
+            // Send cookies to the headless browser
+            if let Some(port) = port {
+                let _ = cookie_bridge::send_cookies_to_headless(port, &cookies, &challenge_url).await;
             }
 
             let resolution = Resolution::ModifyHeaders {
@@ -187,7 +239,15 @@ impl ChallengeResolver for TauriChallengeResolver {
 
         let _ = self.app_handle.emit("challenge-detected", &info);
 
-        if let Err(e) = self.open_challenge_window(&info, tx).await {
+        // Try to find an instance associated with this URL
+        let instance_id = {
+            let instances = self.app_handle.state::<crate::AppState>();
+            let lock = instances.instances.lock().unwrap();
+            // Return the first instance — in practice you'd match by URL
+            lock.keys().next().cloned()
+        };
+
+        if let Err(e) = self.open_challenge_window(&info, instance_id.as_deref(), tx).await {
             tracing::error!(url = %info.url, error = %e, "failed to open challenge window");
             return Resolution::Blocked(e);
         }

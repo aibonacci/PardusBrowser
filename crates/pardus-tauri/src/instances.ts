@@ -6,7 +6,6 @@ export class InstanceManager {
   private tableBody: HTMLElement;
   private noInstances: HTMLElement;
   private onLog: (entry: LogEntry) => void;
-  private challengeListenerCleanup: (() => void) | null = null;
 
   constructor(
     tableBody: HTMLElement,
@@ -33,6 +32,8 @@ export class InstanceManager {
       this.instances.push(inst);
       this.render();
       this.onLog({ level: "info", message: `Instance ${inst.id} spawned on port ${inst.port}`, timestamp: ts() });
+      // Auto-open browser window
+      await this.openBrowser(inst.id);
     } catch (e) {
       this.onLog({ level: "error", message: `Spawn failed: ${e}`, timestamp: ts() });
     }
@@ -60,6 +61,35 @@ export class InstanceManager {
     }
   }
 
+  async openBrowser(id: string): Promise<void> {
+    try {
+      await api.openBrowserWindow(id);
+      this.onLog({ level: "info", message: `Browser view opened for ${id}`, timestamp: ts() });
+      await this.refresh();
+    } catch (e) {
+      this.onLog({ level: "error", message: `Open browser failed: ${e}`, timestamp: ts() });
+    }
+  }
+
+  async closeBrowser(id: string): Promise<void> {
+    try {
+      await api.closeBrowserWindow(id);
+      this.onLog({ level: "info", message: `Browser view closed for ${id}`, timestamp: ts() });
+      await this.refresh();
+    } catch (e) {
+      this.onLog({ level: "error", message: `Close browser failed: ${e}`, timestamp: ts() });
+    }
+  }
+
+  async navigateInBrowser(id: string, url: string): Promise<void> {
+    try {
+      await api.navigateBrowserWindow(id, url);
+      this.onLog({ level: "info", message: `Navigating ${id} to ${url}`, timestamp: ts() });
+    } catch (e) {
+      this.onLog({ level: "error", message: `Navigate failed: ${e}`, timestamp: ts() });
+    }
+  }
+
   private render(): void {
     this.tableBody.innerHTML = "";
 
@@ -71,27 +101,54 @@ export class InstanceManager {
 
     for (const inst of this.instances) {
       const tr = document.createElement("tr");
+
+      const statusClass = inst.agent_status === "waiting-challenge" ? "challenge" : inst.agent_status;
+      const browserBtn = inst.browser_window_open
+        ? `<button class="btn-sm" data-close-browser="${inst.id}">Close View</button>`
+        : `<button class="btn-sm" data-open-browser="${inst.id}">Open View</button>`;
+
       tr.innerHTML = `
         <td>${inst.id}</td>
         <td>${inst.port}</td>
         <td class="mono">${inst.ws_url}</td>
-        <td><span class="status running">running</span></td>
+        <td><span class="status ${statusClass}">${inst.agent_status}</span></td>
         <td>
-          <button class="btn-danger btn-sm" data-kill="${inst.id}">Kill</button>
+          <div class="url-row">
+            <input type="text" class="url-input" placeholder="https://..." value="${inst.current_url || ""}" data-url-input="${inst.id}" />
+            <button class="btn-sm" data-navigate="${inst.id}">Go</button>
+          </div>
+        </td>
+        <td>
+          ${browserBtn}
           <button class="btn-sm" data-copy="${inst.ws_url}">Copy WS</button>
+          <button class="btn-danger btn-sm" data-kill="${inst.id}">Kill</button>
         </td>
       `;
+
       tr.querySelector(`[data-kill="${inst.id}"]`)?.addEventListener("click", () => this.kill(inst.id));
       tr.querySelector(`[data-copy="${inst.ws_url}"]`)?.addEventListener("click", () => {
         navigator.clipboard.writeText(inst.ws_url);
       });
+      tr.querySelector(`[data-open-browser="${inst.id}"]`)?.addEventListener("click", () => this.openBrowser(inst.id));
+      tr.querySelector(`[data-close-browser="${inst.id}"]`)?.addEventListener("click", () => this.closeBrowser(inst.id));
+      tr.querySelector(`[data-navigate="${inst.id}"]`)?.addEventListener("click", () => {
+        const input = tr.querySelector(`[data-url-input="${inst.id}"]`) as HTMLInputElement;
+        if (input?.value) this.navigateInBrowser(inst.id, input.value);
+      });
+
+      const urlInput = tr.querySelector(`[data-url-input="${inst.id}"]`);
+      urlInput?.addEventListener("keydown", (e) => {
+        if ((e as KeyboardEvent).key === "Enter") {
+          const val = (e.target as HTMLInputElement).value;
+          if (val) this.navigateInBrowser(inst.id, val);
+        }
+      });
+
       this.tableBody.appendChild(tr);
     }
   }
 
-  destroy(): void {
-    this.challengeListenerCleanup?.();
-  }
+  destroy(): void {}
 }
 
 function ts(): string {

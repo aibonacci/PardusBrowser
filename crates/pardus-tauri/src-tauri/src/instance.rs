@@ -5,6 +5,9 @@ pub struct ManagedInstance {
     pub port: u16,
     pub process: Child,
     pub ws_url: String,
+    pub browser_window_label: Option<String>,
+    pub current_url: Option<String>,
+    pub agent_status: String,
 }
 
 impl std::fmt::Debug for ManagedInstance {
@@ -13,6 +16,9 @@ impl std::fmt::Debug for ManagedInstance {
             .field("id", &self.id)
             .field("port", &self.port)
             .field("ws_url", &self.ws_url)
+            .field("browser_window_label", &self.browser_window_label)
+            .field("current_url", &self.current_url)
+            .field("agent_status", &self.agent_status)
             .finish()
     }
 }
@@ -28,7 +34,17 @@ pub fn find_free_port(base: u16) -> u16 {
 }
 
 pub fn spawn_browser_process(port: u16) -> anyhow::Result<Child> {
-    let child = std::process::Command::new("pardus-browser")
+    // Try absolute path first (same dir as tauri binary), fall back to PATH
+    let bin_path = std::env::current_exe()?
+        .parent()
+        .map(|p| p.join("pardus-browser"))
+        .filter(|p| p.exists());
+
+    let bin = bin_path
+        .as_deref()
+        .unwrap_or(std::path::Path::new("pardus-browser"));
+
+    let child = std::process::Command::new(bin)
         .arg("serve")
         .arg("--port")
         .arg(port.to_string())

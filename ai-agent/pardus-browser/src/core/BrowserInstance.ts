@@ -39,7 +39,12 @@ export class BrowserInstance extends EventEmitter {
   private pendingRequests = new Map<number, { resolve: (value: unknown) => void; reject: (reason: Error) => void }>();
   private requestTimeout = 30000; // 30 second default timeout
   private navigateTimeout = 60000; // 60 seconds for navigation
-  
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
+  private reconnectBaseDelay = 500; // ms
+  private isReconnecting = false;
+  private intentionallyClosed = false;
+
   public readonly id: string;
   public readonly port: number;
   public currentUrl?: string;
@@ -147,8 +152,86 @@ export class BrowserInstance extends EventEmitter {
       this.ws.on('close', () => {
         this.connected = false;
         this.emit('disconnected');
+        this.attemptReconnect();
       });
     });
+  }
+
+  /**
+   * Attempt to reconnect the WebSocket with exponential backoff.
+   * Only reconnects if the browser process is still alive and we weren't
+   * intentionally closed.
+   */
+  private async attemptReconnect(): Promise<void> {
+    if (this.intentionallyClosed || this.isReconnecting) return;
+
+    // Don't reconnect if the process is dead
+    if (!this.process || this.process.exitCode !== null) return;
+
+    this.isReconnecting = true;
+
+    while (this.reconnectAttempts < this.maxReconnectAttempts && !this.intentionallyClosed) {
+      this.reconnectAttempts++;
+      const delay = Math.min(
+        this.reconnectBaseDelay * Math.pow(2, this.reconnectAttempts - 1),
+        15000 // max 15s
+      );
+
+      console.log(`[Reconnect] Instance ${this.id}: attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
+
+      await this.sleep(delay);
+
+      // Check again after sleep — process might have died or we were closed
+      if (this.intentionallyClosed || !this.process || this.process.exitCode !== null) break;
+
+      try {
+        await this.connectWebSocket();
+        this.reconnectAttempts = 0;
+        this.isReconnecting = false;
+        this.emit('reconnected');
+        console.log(`[Reconnect] Instance ${this.id}: reconnected`);
+        return;
+      } catch {
+        // Connection failed, retry
+      }
+    }
+
+    this.isReconnecting = false;
+    this.emit('reconnect_failed');
+    console.log(`[Reconnect] Instance ${this.id}: all attempts exhausted`);
+  }
+
+  /**
+   * Wait for the DOM to settle after a user interaction (click, submit, etc.)
+   * Polls document.readyState and DOM size until stable, with a minimum wait.
+   */
+  private async waitForDomSettle(minWaitMs = 100, maxWaitMs = 3000, pollIntervalMs = 100): Promise<void> {
+    await this.sleep(minWaitMs);
+
+    const deadline = Date.now() + maxWaitMs;
+    let lastNodeCount = -1;
+    let stableCount = 0;
+
+    while (Date.now() < deadline) {
+      const check = await this.sendCommand(
+        'Runtime.evaluate',
+        { expression: 'document.readyState + "|" + document.querySelectorAll("*").length', returnByValue: true }
+      ) as { result?: { value?: string } };
+
+      const parts = (check.result?.value ?? '').split('|');
+      const readyState = parts[0];
+      const nodeCount = parseInt(parts[1] ?? '0', 10);
+
+      if (readyState === 'complete' && nodeCount === lastNodeCount) {
+        stableCount++;
+        if (stableCount >= 2) return; // DOM stable for 2 consecutive polls
+      } else {
+        stableCount = 0;
+      }
+
+      lastNodeCount = nodeCount;
+      await this.sleep(pollIntervalMs);
+    }
   }
 
   private sendCommand(method: string, params?: Record<string, unknown>, timeout?: number): Promise<unknown> {
@@ -266,7 +349,7 @@ export class BrowserInstance extends EventEmitter {
         };
       }
 
-      await this.sleep(500);
+      await this.waitForDomSettle();
 
       const pageInfo = await this.sendCommand('Page.getNavigationHistory', {}) as {
         currentIndex: number;
@@ -366,7 +449,7 @@ export class BrowserInstance extends EventEmitter {
         };
       }
 
-      await this.sleep(1000);
+      await this.waitForDomSettle(200, 5000);
 
       const pageInfo = await this.sendCommand('Page.getNavigationHistory', {}) as {
         currentIndex: number;
@@ -407,8 +490,20 @@ export class BrowserInstance extends EventEmitter {
       }[direction];
 
       await this.sendCommand('Runtime.evaluate', { expression: scrollScript });
-      
-      return { success: true };
+
+      // Wait briefly for any lazy-loaded content to start loading
+      await this.sleep(300);
+
+      // Fetch the updated semantic tree
+      const treeResult = await this.sendCommand(
+        'Runtime.evaluate',
+        { expression: 'document.semanticTree || document.body.innerText' }
+      ) as { result?: { value?: string } };
+
+      return {
+        success: true,
+        markdown: treeResult.result?.value ?? '',
+      };
     } catch (error) {
       return {
         success: false,
@@ -722,6 +817,7 @@ export class BrowserInstance extends EventEmitter {
   }
 
   kill(): void {
+    this.intentionallyClosed = true;
     if (this.ws) {
       this.ws.close();
       this.ws = null;

@@ -4,6 +4,7 @@
 //! Provides a minimal `document` and `window` shim via ops that interact with the DOM.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -19,6 +20,10 @@ use super::dom::DomDocument;
 use super::extension::pardus_dom;
 use super::snapshot::get_bootstrap_snapshot;
 use crate::sandbox::{JsSandboxMode, SandboxPolicy};
+use crate::session::SessionStore;
+
+/// Per-execution in-memory sessionStorage (not persisted to disk).
+pub type SessionStorageMap = HashMap<String, HashMap<String, String>>;
 
 // ==================== Configuration ====================
 
@@ -297,6 +302,7 @@ fn create_runtime(
     base_url: &Url,
     sandbox: &SandboxPolicy,
     user_agent: &str,
+    session: Option<Arc<SessionStore>>,
 ) -> anyhow::Result<JsRuntime> {
     let snapshot = get_bootstrap_snapshot(&sandbox.js_mode);
     let mut runtime = JsRuntime::new(RuntimeOptions {
@@ -319,6 +325,14 @@ fn create_runtime(
         blocked: sandbox.block_js_fetch,
     });
 
+    // Store session store for cookie/localStorage ops
+    if let Some(session_store) = session {
+        runtime.op_state().borrow_mut().put(session_store);
+    }
+
+    // Store per-execution in-memory sessionStorage
+    runtime.op_state().borrow_mut().put(SessionStorageMap::new());
+
     // Set up window.location and user agent from base_url.
     // Use individual property assignments (not `window.location = {...}`)
     // to preserve the Proxy setter from bootstrap.js that detects
@@ -335,6 +349,7 @@ fn create_runtime(
         window.location.search = "{}";
         window.location.hash = "{}";
         globalThis.__pardusUserAgent = "{}";
+        globalThis.__pardusOrigin = "{}";
         var _docEl = document.documentElement;
         if (_docEl) _docEl.removeAttribute("data-pardus-navigation-href");
         "#,
@@ -347,6 +362,7 @@ fn create_runtime(
         base_url.query().unwrap_or(""),
         base_url.fragment().unwrap_or(""),
         ua_escaped,
+        base_url.origin().ascii_serialization(),
     );
 
     runtime.execute_script("location.js", location_js)?;
@@ -361,6 +377,7 @@ fn create_runtime_snapshot(
     base_url: &Url,
     sandbox: &SandboxPolicy,
     user_agent: &str,
+    session: Option<Arc<SessionStore>>,
 ) -> anyhow::Result<(JsRuntime, bool)> {
     let snapshot = get_bootstrap_snapshot(&sandbox.js_mode);
 
@@ -379,6 +396,14 @@ fn create_runtime_snapshot(
     // Store sandbox policy in op state so ops can check restrictions
     runtime.op_state().borrow_mut().put(sandbox.clone());
 
+    // Store session store for cookie/localStorage ops
+    if let Some(session_store) = session {
+        runtime.op_state().borrow_mut().put(session_store);
+    }
+
+    // Store per-execution in-memory sessionStorage
+    runtime.op_state().borrow_mut().put(SessionStorageMap::new());
+
     // Set up window.location and user agent from base_url.
     // Use individual property assignments (not `window.location = {...}`)
     // to preserve the Proxy setter from bootstrap.js that detects
@@ -395,6 +420,7 @@ fn create_runtime_snapshot(
         window.location.search = "{}";
         window.location.hash = "{}";
         globalThis.__pardusUserAgent = "{}";
+        globalThis.__pardusOrigin = "{}";
         var _docEl = document.documentElement;
         if (_docEl) _docEl.removeAttribute("data-pardus-navigation-href");
         "#,
@@ -407,6 +433,7 @@ fn create_runtime_snapshot(
         base_url.query().unwrap_or(""),
         base_url.fragment().unwrap_or(""),
         ua_escaped,
+        base_url.origin().ascii_serialization(),
     );
 
     runtime.execute_script("location.js", location_js)?;
@@ -446,6 +473,7 @@ fn execute_scripts_with_timeout(
     timeout_ms: u64,
     sandbox: SandboxPolicy,
     user_agent: String,
+    session: Option<Arc<SessionStore>>,
 ) -> Option<String> {
     let lock = Arc::new(Mutex::new(ThreadResult {
         dom_html: None,
@@ -486,7 +514,7 @@ fn execute_scripts_with_timeout(
         let dom = Rc::new(RefCell::new(doc));
 
         // Create runtime (pass sandbox policy, use snapshot if available)
-        let (mut runtime, bootstrapped) = match create_runtime_snapshot(dom.clone(), &base, &sandbox, &user_agent) {
+        let (mut runtime, bootstrapped) = match create_runtime_snapshot(dom.clone(), &base, &sandbox, &user_agent, session) {
             Ok(r) => r,
             Err(e) => {
                 *lock.lock() = ThreadResult {
@@ -703,6 +731,7 @@ pub async fn execute_js(
     wait_ms: u32,
     sandbox: Option<&SandboxPolicy>,
     user_agent: &str,
+    session: Option<Arc<SessionStore>>,
 ) -> anyhow::Result<String> {
     let sandbox = sandbox.cloned().unwrap_or_default();
 
@@ -764,6 +793,7 @@ pub async fn execute_js(
         timeout,
         sandbox,
         user_agent.to_string(),
+        session,
     );
 
     match result {
@@ -953,14 +983,14 @@ export function hello() {}</script>
     #[tokio::test]
     async fn test_execute_js_no_scripts() {
         let html = "<html><body><p>Hello</p></body></html>";
-        let result = execute_js(html, "https://example.com", 100, None, "test-ua").await.unwrap();
+        let result = execute_js(html, "https://example.com", 100, None, "test-ua", None).await.unwrap();
         assert_eq!(result, html);
     }
 
     #[tokio::test]
     async fn test_execute_js_invalid_url() {
         let html = "<html><body><p>Hello</p></body></html>";
-        let result = execute_js(html, "not-a-url", 100, None, "test-ua").await.unwrap();
+        let result = execute_js(html, "not-a-url", 100, None, "test-ua", None).await.unwrap();
         assert_eq!(result, html);
     }
 
@@ -971,7 +1001,7 @@ export function hello() {}</script>
                 <script>gtag('event', 'click');</script>
             </body></html>
         "#;
-        let result = execute_js(html, "https://example.com", 100, None, "test-ua").await.unwrap();
+        let result = execute_js(html, "https://example.com", 100, None, "test-ua", None).await.unwrap();
         assert!(result.contains("<html>"));
     }
 
@@ -1030,7 +1060,7 @@ export function hello() {}</script>
                 <script>document.body.innerHTML = 'Safe';</script>
             </body></html>
         "#;
-        let result = execute_js(html, "https://example.com", 100, None, "test-ua").await.unwrap();
+        let result = execute_js(html, "https://example.com", 100, None, "test-ua", None).await.unwrap();
         assert!(result.contains("Safe"));
     }
 }
