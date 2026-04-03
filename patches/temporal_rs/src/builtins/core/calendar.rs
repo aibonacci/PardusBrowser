@@ -25,12 +25,12 @@ use icu_calendar::{
 use icu_calendar::{
     cal::{HijriTabularEpoch, HijriTabularLeapYears},
     options::{
-        DateAddOptions, DateDifferenceOptions, DateFromFieldsOptions, MissingFieldsStrategy,
+        DateAddOptions, DateDifferenceOptions, DateDurationUnit as IcuUnit,
+        DateFromFieldsOptions, MissingFieldsStrategy,
         Overflow as IcuOverflow,
     },
     preferences::CalendarAlgorithm,
     types::DateDuration as IcuDateDuration,
-    types::DateDurationUnit as IcuUnit,
     types::DateFields,
     Gregorian,
 };
@@ -280,7 +280,7 @@ fn early_constrain_date_duration(duration: &IcuDateDuration) -> Result<(), Tempo
     if duration.weeks > WEEK_DURATION {
         return err;
     }
-    if duration.days > DAY_DURATION.into() {
+    if duration.days > DAY_DURATION {
         return err;
     }
 
@@ -472,7 +472,7 @@ impl Calendar {
             years: u32::try_from(duration.years.abs()).map_err(|_| invalid)?,
             months: u32::try_from(duration.months.abs()).map_err(|_| invalid)?,
             weeks: u32::try_from(duration.weeks.abs()).map_err(|_| invalid)?,
-            days: u64::try_from(duration.days.abs()).map_err(|_| invalid)?,
+            days: u32::try_from(duration.days.abs()).map_err(|_| invalid)?,
         };
 
         early_constrain_date_duration(&duration)?;
@@ -508,7 +508,7 @@ impl Calendar {
         let calendar_date1 = self.0.from_iso(*one.to_icu4x().inner());
         let calendar_date2 = self.0.from_iso(*two.to_icu4x().inner());
 
-        let added = self.0.until(&calendar_date1, &calendar_date2, options)?;
+        let added = self.0.until(&calendar_date1, &calendar_date2, options);
 
         let days = added
             .days

@@ -4,8 +4,7 @@ use core::fmt;
 use ixdtf::ParseError;
 use timezone_provider::TimeZoneProviderError;
 
-use icu_calendar::cal::AnyCalendarDifferenceError;
-use icu_calendar::error::{DateError, DateFromFieldsError, RangeError};
+use icu_calendar::error::{DateAddError, DateError, DateFromFieldsError};
 
 /// `TemporalError`'s error type.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -165,9 +164,9 @@ impl From<DateFromFieldsError> for TemporalError {
     }
 }
 
-impl From<AnyCalendarDifferenceError> for TemporalError {
-    fn from(error: AnyCalendarDifferenceError) -> Self {
-        TemporalError::range().with_enum(ErrorMessage::Icu4xUntil(error))
+impl From<DateAddError> for TemporalError {
+    fn from(error: DateAddError) -> Self {
+        TemporalError::range().with_message("Date addition error.")
     }
 }
 
@@ -226,7 +225,6 @@ pub(crate) enum ErrorMessage {
     Ixdtf(ParseError),
     Icu4xDate(DateError),
     Icu4xDateFromFields(DateFromFieldsError),
-    Icu4xUntil(AnyCalendarDifferenceError),
 }
 
 impl ErrorMessage {
@@ -272,8 +270,7 @@ impl ErrorMessage {
             Self::None => "",
             Self::String(s) => s,
             Self::Ixdtf(s) => ixdtf_error_to_static_string(s),
-            Self::Icu4xDate(DateError::Range { field, .. })
-            | Self::Icu4xDateFromFields(DateFromFieldsError::Range(RangeError { field, .. })) => {
+            Self::Icu4xDate(DateError::Range { field, .. }) => {
                 match field {
                     "year" => "Year out of range.",
                     "month" => "Month out of range.",
@@ -281,16 +278,17 @@ impl ErrorMessage {
                     _ => "Field out of range.",
                 }
             }
+            Self::Icu4xDateFromFields(DateFromFieldsError::Overflow) => "Field out of range.",
             Self::Icu4xDate(DateError::UnknownEra)
-            | Self::Icu4xDateFromFields(DateFromFieldsError::UnknownEra) => "Unknown era.",
+            | Self::Icu4xDateFromFields(DateFromFieldsError::InvalidEra) => "Unknown era.",
             Self::Icu4xDate(DateError::UnknownMonthCode(..)) => "Unknown month code.",
             Self::Icu4xDateFromFields(DateFromFieldsError::MonthCodeInvalidSyntax) => {
                 "Invalid month code."
             }
-            Self::Icu4xDateFromFields(DateFromFieldsError::MonthCodeNotInCalendar) => {
+            Self::Icu4xDateFromFields(DateFromFieldsError::MonthNotInCalendar) => {
                 "Month code not in calendar."
             }
-            Self::Icu4xDateFromFields(DateFromFieldsError::MonthCodeNotInYear) => {
+            Self::Icu4xDateFromFields(DateFromFieldsError::MonthNotInYear) => {
                 "Month code not in year."
             }
             Self::Icu4xDateFromFields(DateFromFieldsError::InconsistentYear) => {
@@ -304,10 +302,6 @@ impl ErrorMessage {
             }
             Self::Icu4xDate(_) => "Date error.",
             Self::Icu4xDateFromFields(_) => "Date error.",
-            Self::Icu4xUntil(AnyCalendarDifferenceError::MismatchedCalendars) => {
-                "Mismatched calendars."
-            }
-            Self::Icu4xUntil(_) => "Arithmetic error.",
         }
     }
 }
