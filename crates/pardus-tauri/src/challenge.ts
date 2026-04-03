@@ -1,4 +1,4 @@
-import type { ChallengeInfo, LogEntry } from "./types";
+import type { LogEntry } from "./types";
 import * as api from "./api";
 import { log } from "./events";
 
@@ -25,7 +25,7 @@ export class ChallengeManager {
     this.onLog = onLog;
   }
 
-  handleDetected(info: ChallengeInfo): void {
+  handleDetected(info: { url: string; kinds: string[]; risk_score: number }): void {
     if (this.activeChallenges.has(info.url)) {
       return;
     }
@@ -40,17 +40,21 @@ export class ChallengeManager {
 
     this.onLog(log("warn", `Challenge detected: ${info.kinds.join(", ")} (score: ${info.risk_score}) — ${info.url}`));
 
-    this.openChallengeWindow(info.url, info.kinds);
+    // The Rust backend automatically opens a browser window with the challenge banner.
+    // No need to open a separate challenge window here.
     this.render();
   }
 
-  private async openChallengeWindow(url: string, kinds: string[]): Promise<void> {
-    try {
-      const label = await api.openChallengeWindow(url, `Solve: ${kinds.join(", ")}`);
-      this.onLog(log("info", `Challenge window opened: ${label}`));
-    } catch (e) {
-      this.onLog(log("error", `Failed to open challenge window: ${e}`));
-    }
+  handleSolved(info: { url: string }): void {
+    this.activeChallenges.delete(info.url);
+    this.onLog(log("info", `Challenge resolved: ${info.url}`));
+    this.render();
+  }
+
+  handleFailed(url: string, reason: string): void {
+    this.activeChallenges.delete(url);
+    this.onLog(log("error", `Challenge failed: ${reason} — ${url}`));
+    this.render();
   }
 
   async submitCookies(url: string, cookies: string): Promise<void> {
@@ -96,7 +100,8 @@ export class ChallengeManager {
         </div>
         <div class="challenge-url">${url}</div>
         <div class="challenge-actions">
-          <button class="btn-sm" data-cookies="${url}">Submit Cookies</button>
+          <span class="challenge-hint">Solve the CAPTCHA in the browser window — cookies will sync automatically</span>
+          <button class="btn-sm" data-cookies="${url}">Paste Cookies</button>
           <button class="btn-sm" data-cancel="${url}">Cancel</button>
         </div>
       `;

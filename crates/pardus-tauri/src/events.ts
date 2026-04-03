@@ -1,23 +1,40 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { ChallengeInfo, LogEntry } from "./types";
+import type { LogEntry } from "./types";
 
 type LogCallback = (entry: LogEntry) => void;
 
-export function onChallengeDetected(callback: (info: ChallengeInfo) => void): Promise<UnlistenFn> {
-  return listen<ChallengeInfo>("challenge-detected", (event) => {
-    callback(event.payload);
+export function onChallengeDetected(
+  callback: (info: { url: string; kinds: string[]; risk_score: number }) => void
+): Promise<UnlistenFn> {
+  return listen("challenge-detected", (event) => {
+    callback(event.payload as any);
   });
 }
 
-export function onChallengeSolved(callback: (info: ChallengeInfo) => void): Promise<UnlistenFn> {
-  return listen<ChallengeInfo>("challenge-solved", (event) => {
-    callback(event.payload);
+export function onChallengeSolved(
+  callback: (info: { url: string }) => void
+): Promise<UnlistenFn> {
+  return listen("challenge-solved", (event) => {
+    callback(event.payload as any);
   });
 }
 
-export function onChallengeFailed(callback: (url: string, reason: string) => void): Promise<UnlistenFn> {
-  return listen<{ challenge_url: string; reason: string }>("challenge-failed", (event) => {
-    callback(event.payload.challenge_url, event.payload.reason);
+export function onChallengeFailed(
+  callback: (url: string, reason: string) => void
+): Promise<UnlistenFn> {
+  return listen<{ challenge_url: string; reason: string }>(
+    "challenge-failed",
+    (event) => {
+      callback(event.payload.challenge_url, event.payload.reason);
+    }
+  );
+}
+
+export function onBrowserUrlChanged(
+  callback: (data: { instance_id: string; url: string }) => void
+): Promise<UnlistenFn> {
+  return listen("browser-url-changed", (event) => {
+    callback(event.payload as any);
   });
 }
 

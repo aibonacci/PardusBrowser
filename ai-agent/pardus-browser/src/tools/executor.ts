@@ -66,9 +66,9 @@ export class ToolExecutor {
   ): Promise<ToolResult> {
     const startTime = Date.now();
     const mergedConfig = { ...DEFAULT_RETRY_CONFIG, ...config };
-    
+
     let lastError: Error | undefined;
-    
+
     for (let attempt = 1; attempt <= mergedConfig.retries + 1; attempt++) {
       try {
         const result = await this.executeToolWithTimeout(
@@ -76,30 +76,30 @@ export class ToolExecutor {
           args as ToolCallArgs,
           mergedConfig.timeout
         );
-        
+
         return result;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        
+
         const isRetryable = mergedConfig.retryableErrors.some(
-          errPattern => lastError!.message.includes(errPattern) || 
+          errPattern => lastError!.message.includes(errPattern) ||
                       lastError!.constructor.name.includes(errPattern)
         );
-        
+
         if (attempt >= mergedConfig.retries + 1 || !isRetryable) {
           break;
         }
-        
+
         const delay = Math.min(
           mergedConfig.retryDelay * Math.pow(mergedConfig.retryBackoff, attempt - 1),
           mergedConfig.maxRetryDelay
         );
-        
+
         console.log(`[Retry] ${name} attempt ${attempt + 1}/${mergedConfig.retries + 1} after ${delay}ms`);
         await this.sleep(delay);
       }
     }
-    
+
     return {
       success: false,
       content: '',
@@ -131,6 +131,7 @@ export class ToolExecutor {
    */
   async executeTools(
     tools: Array<{
+      toolCallId: string;
       name: BrowserToolName;
       args: Record<string, unknown>;
       config?: ToolExecutionConfig;
@@ -145,6 +146,7 @@ export class ToolExecutor {
     if (!options?.parallel) {
       for (const tool of tools) {
         const result = await this.executeToolWithTracking(
+          tool.toolCallId,
           tool.name,
           tool.args,
           tool.config
@@ -162,6 +164,7 @@ export class ToolExecutor {
         const groupResults = await Promise.all(
           group.tools.map(tool =>
             this.executeToolWithTracking(
+              tool.toolCallId!,
               tool.name as BrowserToolName,
               tool.args,
               tool.config
@@ -179,6 +182,7 @@ export class ToolExecutor {
             const retryResults = await Promise.all(
               group.tools.map(tool =>
                 this.executeToolWithTracking(
+                  tool.toolCallId!,
                   tool.name as BrowserToolName,
                   tool.args,
                   { ...tool.config, retries: (tool.config?.retries ?? 0) + 1 }
@@ -207,17 +211,18 @@ export class ToolExecutor {
    * Execute a single tool and track execution details
    */
   private async executeToolWithTracking(
+    toolCallId: string,
     name: BrowserToolName,
     args: Record<string, unknown>,
     config?: ToolExecutionConfig
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const mergedConfig = { ...DEFAULT_RETRY_CONFIG, ...config };
-    
+
     let lastError: string | undefined;
     let lastContent: string | undefined;
     let attempts = 0;
-    
+
     for (let attempt = 1; attempt <= mergedConfig.retries + 1; attempt++) {
       attempts = attempt;
       try {
@@ -226,8 +231,9 @@ export class ToolExecutor {
           args as ToolCallArgs,
           mergedConfig.timeout
         );
-        
+
         return {
+          toolCallId,
           name,
           args,
           success: result.success,
@@ -239,25 +245,26 @@ export class ToolExecutor {
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
         lastContent = '';
-        
+
         const isRetryable = mergedConfig.retryableErrors.some(
           errPattern => lastError!.includes(errPattern)
         );
-        
+
         if (attempt >= mergedConfig.retries + 1 || !isRetryable) {
           break;
         }
-        
+
         const delay = Math.min(
           mergedConfig.retryDelay * Math.pow(mergedConfig.retryBackoff, attempt - 1),
           mergedConfig.maxRetryDelay
         );
-        
+
         await this.sleep(delay);
       }
     }
-    
+
     return {
+      toolCallId,
       name,
       args,
       success: false,
@@ -564,10 +571,13 @@ export class ToolExecutor {
         };
       }
 
-      return {
-        success: true,
-        content: `Scrolled ${args.direction}`,
-      };
+      let content = `## Scroll Result\n\n- **Direction**: ${args.direction}\n`;
+
+      if (result.markdown) {
+        content += `\n---\n\n## Page Content\n\n${result.markdown}`;
+      }
+
+      return { success: true, content };
     } catch (error) {
       return {
         success: false,

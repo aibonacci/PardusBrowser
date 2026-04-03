@@ -3,6 +3,9 @@ export interface InstanceInfo {
   port: number;
   ws_url: string;
   running: boolean;
+  browser_window_open: boolean;
+  current_url: string | null;
+  agent_status: "idle" | "running" | "waiting-challenge";
 }
 
 export interface ChallengeInfo {

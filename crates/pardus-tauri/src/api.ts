@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { InstanceInfo } from "./types";
 
+// ---------------------------------------------------------------------------
+// Instance management
+// ---------------------------------------------------------------------------
+
 export async function listInstances(): Promise<InstanceInfo[]> {
   return invoke<InstanceInfo[]>("list_instances");
 }
@@ -16,6 +20,32 @@ export async function killInstance(id: string): Promise<void> {
 export async function killAllInstances(): Promise<void> {
   return invoke<void>("kill_all_instances");
 }
+
+// ---------------------------------------------------------------------------
+// Browser window
+// ---------------------------------------------------------------------------
+
+export async function openBrowserWindow(
+  instanceId: string,
+  url?: string
+): Promise<void> {
+  return invoke<void>("open_browser_window", { instanceId, url });
+}
+
+export async function navigateBrowserWindow(
+  instanceId: string,
+  url: string
+): Promise<void> {
+  return invoke<void>("navigate_browser_window", { instanceId, url });
+}
+
+export async function closeBrowserWindow(instanceId: string): Promise<void> {
+  return invoke<void>("close_browser_window", { instanceId });
+}
+
+// ---------------------------------------------------------------------------
+// Challenge
+// ---------------------------------------------------------------------------
 
 export async function openChallengeWindow(
   url: string,

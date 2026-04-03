@@ -23,6 +23,9 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 url = { workspace = true }
 
+tokio-tungstenite = "0.26"
+futures-util = { workspace = true }
+
 pardus-core = { path = "../../pardus-core" }
 pardus-challenge = { path = "../../pardus-challenge" }
 pardus-cdp = { path = "../../pardus-cdp" }

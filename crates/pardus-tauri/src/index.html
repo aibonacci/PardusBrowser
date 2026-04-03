@@ -51,11 +51,21 @@
     .btn-sm { padding: 4px 10px; font-size: 12px; border-radius: 4px; background: var(--border); color: var(--text); }
     .btn-sm:hover { background: #444c56; }
     table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
     th { color: var(--text-muted); font-size: 11px; font-weight: 500; }
     .mono { font-family: 'SF Mono', 'Cascadia Code', monospace; font-size: 12px; }
-    .status { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
+    .status { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; display: inline-block; }
+    .status.idle { background: rgba(139,148,158,0.12); color: var(--text-muted); }
     .status.running { background: rgba(63,185,80,0.12); color: var(--success); }
+    .status.challenge { background: rgba(248,81,73,0.15); color: var(--danger); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+    .url-row { display: flex; gap: 4px; align-items: center; }
+    .url-input {
+      flex: 1; height: 26px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text); padding: 0 6px; font-size: 12px;
+      font-family: 'SF Mono', 'Cascadia Code', monospace; outline: none; min-width: 120px;
+    }
+    .url-input:focus { border-color: var(--accent); }
     .log {
       background: var(--bg);
       border: 1px solid var(--border);
@@ -71,6 +81,8 @@
     .log-entry.warn { color: var(--warn); }
     .log-entry.error { color: var(--danger); }
     #challenge-panel { display: none; }
+    #challenge-panel.active { display: block; border-color: var(--warn); animation: glow 2s infinite; }
+    @keyframes glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(210,153,34,0); } 50% { box-shadow: 0 0 12px 2px rgba(210,153,34,0.3); } }
     .challenge-item {
       background: var(--bg);
       border: 1px solid var(--border);
@@ -83,14 +95,15 @@
     .challenge-score { font-size: 11px; color: var(--text-muted); }
     .challenge-elapsed { font-size: 11px; color: var(--text-muted); margin-left: auto; }
     .challenge-url { font-family: 'SF Mono', 'Cascadia Code', monospace; font-size: 11px; color: var(--text-muted); margin-bottom: 8px; word-break: break-all; }
-    .challenge-actions { display: flex; gap: 6px; }
+    .challenge-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .challenge-hint { font-size: 11px; color: var(--text-muted); font-style: italic; }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>Pardus Browser</h1>
-    <p class="subtitle">AI agent browser launcher with CAPTCHA human-in-the-loop</p>
-    <button id="btn-spawn">Spawn Instance</button>
+    <p class="subtitle">AI agent browser with visual control and CAPTCHA handoff</p>
+    <button id="btn-spawn">Spawn + Open Browser</button>
     <button id="btn-kill-all" class="btn-danger">Kill All</button>
   </div>
 
@@ -98,12 +111,12 @@
     <h2>Instances</h2>
     <table>
       <thead>
-        <tr><th>ID</th><th>Port</th><th>WebSocket URL</th><th>Status</th><th>Actions</th></tr>
+        <tr><th>ID</th><th>Port</th><th>WebSocket</th><th>Status</th><th>Navigate</th><th>Actions</th></tr>
       </thead>
       <tbody id="instance-table"></tbody>
     </table>
     <p id="no-instances" style="color: var(--text-muted); font-size: 12px; padding: 8px;">
-      No instances running
+      No instances running — click "Spawn + Open Browser" to start
     </p>
   </div>
 
@@ -117,6 +130,6 @@
     <div class="log" id="log-entries"></div>
   </div>
 
-  <script src="main.js"></script>
+  <script type="module" src="bundle.js"></script>
 </body>
 </html>

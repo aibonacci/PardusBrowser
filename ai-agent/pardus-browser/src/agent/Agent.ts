@@ -1,4 +1,4 @@
-import { LLMClient, LLMConfig, Message, getSystemPrompt } from '../llm/index.js';
+import { LLMClient, LLMConfig, Message, getSystemPrompt, compactMessages, truncateToolResult, ContextConfig } from '../llm/index.js';
 import { ToolExecutor } from '../tools/executor.js';
 import { BrowserManager } from '../core/index.js';
 import { BrowserToolName } from '../tools/definitions.js';
@@ -13,13 +13,15 @@ interface AgentOptions {
   maxRounds?: number;
   /** Tool execution configuration */
   toolConfig?: {
-    /** Enable parallel execution where safe (default: false) */
+    /** Enable parallel execution where safe (default: true) */
     parallel?: boolean;
     /** Continue on tool failure (default: true) */
     continueOnError?: boolean;
     /** Default retry configuration for all tools */
     defaultRetryConfig?: ToolExecutionConfig;
   };
+  /** Context window management configuration */
+  contextConfig?: Partial<ContextConfig>;
 }
 
 /**
@@ -36,6 +38,7 @@ export class Agent {
   private browserManager: BrowserManager;
   private isRunning = false;
   private toolConfig: AgentOptions['toolConfig'];
+  private contextConfig: ContextConfig;
 
   constructor(browserManager: BrowserManager, options: AgentOptions) {
     this.browserManager = browserManager;
@@ -43,9 +46,16 @@ export class Agent {
     this.toolExecutor = new ToolExecutor(browserManager);
     this.maxRounds = options.maxRounds ?? 50;
     this.toolConfig = {
-      parallel: false,
+      parallel: true,
       continueOnError: true,
       ...options.toolConfig,
+    };
+    this.contextConfig = {
+      maxTokens: 100_000,
+      keepRecentMessages: 10,
+      maxToolResultChars: 6000,
+      charsPerToken: 4,
+      ...options.contextConfig,
     };
 
     // Initialize with system prompt
@@ -128,22 +138,21 @@ export class Agent {
           return errorMessage;
         }
 
-        // Add all tool results to conversation
+        // Add all tool results to conversation — toolCallId flows from the LLM response
         for (const result of toolResults) {
-          // Find the original tool call ID
-          const toolCall = response.toolCalls.find(t => 
-            t.name === result.name && 
-            JSON.stringify(t.arguments) === JSON.stringify(result.args)
-          );
-          
+          const content = result.success
+            ? truncateToolResult(result.content || '', this.contextConfig.maxToolResultChars)
+            : `Error: ${result.error || 'Unknown error'}\n\nPartial result: ${result.content || 'none'}`;
+
           this.messages.push({
             role: 'tool',
-            tool_call_id: toolCall?.id || 'unknown',
-            content: result.success 
-              ? (result.content || '')
-              : `Error: ${result.error || 'Unknown error'}\n\nPartial result: ${result.content || 'none'}`,
+            tool_call_id: result.toolCallId || 'unknown',
+            content,
           });
         }
+
+        // Compact conversation history if approaching context limit
+        this.messages = compactMessages(this.messages, this.contextConfig);
       }
 
       if (rounds >= this.maxRounds) {
@@ -169,7 +178,7 @@ export class Agent {
     if (!this.toolConfig?.parallel) {
       // Sequential execution
       const results: ToolExecutionResult[] = [];
-      
+
       for (const call of toolCalls) {
         console.log(`[Tool] ${call.name}: ${JSON.stringify(call.arguments)}`);
 
@@ -180,6 +189,7 @@ export class Agent {
         );
 
         results.push({
+          toolCallId: call.id,
           name: call.name,
           args: call.arguments,
           success: result.success,
@@ -196,12 +206,12 @@ export class Agent {
           console.log(`[Tool Error] ${result.error}`);
         }
       }
-      
+
       return results;
     } else {
       // Parallel execution with grouping
-      // Convert to format expected by executeTools
       const tools = toolCalls.map(call => ({
+        toolCallId: call.id,
         name: call.name as BrowserToolName,
         args: call.arguments,
         config: this.toolConfig?.defaultRetryConfig,
@@ -220,42 +230,100 @@ export class Agent {
           console.log(`[Tool Error] ${result.error}`);
         }
       }
-      
+
       return parallelResult.results;
     }
   }
 
   /**
-   * Stream a response for interactive CLI
-   * 
-   * Note: Tool calls still happen after the stream completes
+   * Stream a response for interactive CLI with full tool call support.
+   *
+   * Yields text chunks as they arrive. Tool calls are buffered and
+   * executed after the stream completes, then the loop continues
+   * (same as chat() but with streamed text output).
    */
   async *streamChat(userMessage: string): AsyncGenerator<string, string, unknown> {
-    // For streaming, we currently don't support mid-stream tool calls
-    // The LLM will respond with text, then we check for tool calls
-    // This is a simplified version - full implementation would parse tool calls from stream
-
-    this.messages.push({
-      role: 'user',
-      content: userMessage,
-    });
-
-    // For simplicity in streaming mode, we don't use tools
-    // Full implementation would parse tool calls from stream
-    const stream = this.llm.streamChat(this.messages);
-    let fullResponse = '';
-
-    for await (const chunk of stream) {
-      fullResponse += chunk;
-      yield chunk;
+    if (this.isRunning) {
+      throw new Error('Agent is already processing a message');
     }
 
-    this.messages.push({
-      role: 'assistant',
-      content: fullResponse,
-    });
+    this.isRunning = true;
 
-    return fullResponse;
+    try {
+      this.messages.push({ role: 'user', content: userMessage });
+
+      let rounds = 0;
+
+      while (rounds < this.maxRounds) {
+        rounds++;
+
+        const result = await this.llm.streamChat(this.messages);
+
+        // Yield any text chunks
+        for (const chunk of result.textChunks) {
+          yield chunk;
+        }
+
+        // No tool calls — done
+        if (!result.toolCalls || result.toolCalls.length === 0) {
+          this.messages.push({
+            role: 'assistant',
+            content: result.content ?? '',
+          });
+          return result.content ?? '';
+        }
+
+        // Add assistant message with tool calls
+        this.messages.push({
+          role: 'assistant',
+          content: result.content ?? '',
+          tool_calls: result.toolCalls.map(call => ({
+            id: call.id,
+            type: 'function' as const,
+            function: {
+              name: call.name,
+              arguments: JSON.stringify(call.arguments),
+            },
+          })),
+        });
+
+        // Execute tool calls
+        const toolResults = await this.executeToolCalls(result.toolCalls);
+
+        const hasFailures = toolResults.some(r => !r.success);
+        if (hasFailures && !this.toolConfig?.continueOnError) {
+          const errorMessage = 'Tool execution failed. Aborting conversation.';
+          this.messages.push({ role: 'assistant', content: errorMessage });
+          yield `\n\n${errorMessage}`;
+          return errorMessage;
+        }
+
+        // Add tool results
+        for (const res of toolResults) {
+          const content = res.success
+            ? truncateToolResult(res.content || '', this.contextConfig.maxToolResultChars)
+            : `Error: ${res.error || 'Unknown error'}\n\nPartial result: ${res.content || 'none'}`;
+
+          this.messages.push({
+            role: 'tool',
+            tool_call_id: res.toolCallId || 'unknown',
+            content,
+          });
+        }
+
+        // Compact context
+        this.messages = compactMessages(this.messages, this.contextConfig);
+
+        // The loop continues — the next iteration will stream the LLM's
+        // response to the tool results (which may include more tool calls).
+      }
+
+      const limitMsg = 'Maximum number of tool call rounds reached.';
+      yield `\n\n${limitMsg}`;
+      return limitMsg;
+    } finally {
+      this.isRunning = false;
+    }
   }
 
   /**

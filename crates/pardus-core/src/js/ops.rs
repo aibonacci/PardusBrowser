@@ -3,9 +3,12 @@
 //! These ops provide the bridge between JavaScript and our Rust DOM implementation.
 
 use super::dom::DomDocument;
+use super::runtime::SessionStorageMap;
+use crate::session::SessionStore;
 use deno_core::*;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 // ==================== Document Methods ====================
 
@@ -394,4 +397,159 @@ pub fn op_undo(state: &mut OpState) -> bool {
 pub fn op_redo(state: &mut OpState) -> bool {
     let dom = state.borrow::<Rc<RefCell<DomDocument>>>().clone();
     dom.borrow_mut().redo()
+}
+
+// ==================== Cookie Ops ====================
+
+#[op2]
+#[string]
+pub fn op_get_document_cookie(state: &mut OpState, #[string] origin: &str) -> String {
+    let session = match state.try_borrow::<Arc<SessionStore>>() {
+        Some(s) => s.clone(),
+        None => return String::new(),
+    };
+    let url = match url::Url::parse(origin) {
+        Ok(u) => u,
+        Err(_) => return String::new(),
+    };
+    match session.cookies(&url) {
+        Some(hv) => hv.to_str().unwrap_or("").to_string(),
+        None => String::new(),
+    }
+}
+
+#[op2(fast)]
+pub fn op_set_document_cookie(state: &mut OpState, #[string] origin: &str, #[string] cookie_str: &str) {
+    let session = match state.try_borrow::<Arc<SessionStore>>() {
+        Some(s) => s.clone(),
+        None => return,
+    };
+    let url = match url::Url::parse(origin) {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+    if cookie_str.trim().is_empty() {
+        return;
+    }
+    if let Ok(header) = rquest::header::HeaderValue::from_str(cookie_str) {
+        let mut iter = std::iter::once(&header);
+        session.set_cookies(&mut iter, &url);
+    }
+}
+
+// ==================== localStorage Ops ====================
+
+#[op2]
+#[string]
+pub fn op_local_storage_get(
+    state: &mut OpState,
+    #[string] origin: &str,
+    #[string] key: &str,
+) -> Option<String> {
+    let session = state.try_borrow::<Arc<SessionStore>>()?;
+    session.local_storage_get(origin, key)
+}
+
+#[op2(fast)]
+pub fn op_local_storage_set(
+    state: &mut OpState,
+    #[string] origin: &str,
+    #[string] key: &str,
+    #[string] value: &str,
+) {
+    if let Some(session) = state.try_borrow::<Arc<SessionStore>>() {
+        session.local_storage_set(origin, key, value);
+    }
+}
+
+#[op2(fast)]
+pub fn op_local_storage_remove(state: &mut OpState, #[string] origin: &str, #[string] key: &str) {
+    if let Some(session) = state.try_borrow::<Arc<SessionStore>>() {
+        session.local_storage_remove(origin, key);
+    }
+}
+
+#[op2(fast)]
+pub fn op_local_storage_clear(state: &mut OpState, #[string] origin: &str) {
+    if let Some(session) = state.try_borrow::<Arc<SessionStore>>() {
+        session.local_storage_clear(origin);
+    }
+}
+
+#[op2]
+#[serde]
+pub fn op_local_storage_keys(state: &mut OpState, #[string] origin: &str) -> Vec<String> {
+    match state.try_borrow::<Arc<SessionStore>>() {
+        Some(session) => session.local_storage_keys(origin),
+        None => Vec::new(),
+    }
+}
+
+#[op2(fast)]
+pub fn op_local_storage_length(state: &mut OpState, #[string] origin: &str) -> u32 {
+    match state.try_borrow::<Arc<SessionStore>>() {
+        Some(session) => session.local_storage_keys(origin).len() as u32,
+        None => 0,
+    }
+}
+
+// ==================== sessionStorage Ops ====================
+
+#[op2]
+#[string]
+pub fn op_session_storage_get(
+    state: &mut OpState,
+    #[string] origin: &str,
+    #[string] key: &str,
+) -> Option<String> {
+    let storage = state.borrow::<SessionStorageMap>();
+    storage.get(origin).and_then(|m| m.get(key).cloned())
+}
+
+#[op2(fast)]
+pub fn op_session_storage_set(
+    state: &mut OpState,
+    #[string] origin: &str,
+    #[string] key: &str,
+    #[string] value: &str,
+) {
+    let storage = state.borrow_mut::<SessionStorageMap>();
+    storage
+        .entry(origin.to_string())
+        .or_default()
+        .insert(key.to_string(), value.to_string());
+}
+
+#[op2(fast)]
+pub fn op_session_storage_remove(
+    state: &mut OpState,
+    #[string] origin: &str,
+    #[string] key: &str,
+) {
+    let storage = state.borrow_mut::<SessionStorageMap>();
+    if let Some(m) = storage.get_mut(origin) {
+        m.remove(key);
+    }
+}
+
+#[op2(fast)]
+pub fn op_session_storage_clear(state: &mut OpState, #[string] origin: &str) {
+    let storage = state.borrow_mut::<SessionStorageMap>();
+    storage.remove(origin);
+}
+
+#[op2]
+#[serde]
+pub fn op_session_storage_keys(state: &mut OpState, #[string] origin: &str) -> Vec<String> {
+    let storage = state.borrow::<SessionStorageMap>();
+    storage
+        .get(origin)
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+#[op2(fast)]
+pub fn op_session_storage_length(state: &mut OpState, #[string] origin: &str) -> u32 {
+    let storage = state.borrow::<SessionStorageMap>();
+    storage.get(origin).map(|m| m.len() as u32).unwrap_or(0)
 }

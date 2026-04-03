@@ -467,7 +467,7 @@ impl Page {
             let sandbox = &app.config.read().sandbox;
             let user_agent = app.config.read().user_agent.clone();
             let final_body =
-                crate::js::execute_js(&html_str, &base_url, wait_ms, Some(sandbox), &user_agent).await?;
+                crate::js::execute_js(&html_str, &base_url, wait_ms, Some(sandbox), &user_agent, Some(app.cookie_jar.clone())).await?;
 
             if let Some(nav_href) = Self::parse_js_navigation_href(&final_body) {
                 let resolved = Url::parse(&page.url)

@@ -77,5 +77,22 @@ deno_core::extension!(
         op_sse_close,
         op_sse_ready_state,
         op_sse_url,
+        // Cookies
+        op_get_document_cookie,
+        op_set_document_cookie,
+        // localStorage
+        op_local_storage_get,
+        op_local_storage_set,
+        op_local_storage_remove,
+        op_local_storage_clear,
+        op_local_storage_keys,
+        op_local_storage_length,
+        // sessionStorage
+        op_session_storage_get,
+        op_session_storage_set,
+        op_session_storage_remove,
+        op_session_storage_clear,
+        op_session_storage_keys,
+        op_session_storage_length,
     ],
 );

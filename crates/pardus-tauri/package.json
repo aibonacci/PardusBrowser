@@ -4,14 +4,15 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "tsc && cp src/index.html dist/index.html",
-    "dev": "tsc --watch",
+    "build": "esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=esm --target=es2022 --platform=browser && cp src/index.html dist/index.html",
+    "dev": "esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=esm --target=es2022 --platform=browser --watch",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0"
   },
   "devDependencies": {
+    "esbuild": "^0.28.0",
     "typescript": "^5.5.0"
   }
 }
